@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>設備 QR Code 掃碼轉址系統</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- html5-qrcode 庫 -->
+    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Google Fonts: Inter & Noto Sans TC -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', 'Noto Sans TC', sans-serif;
+            background-color: #0f172a;
+            color: #f8fafc;
+        }
+        /* 隱藏 html5-qrcode 預設不太美觀的 UI */
+        #qr-reader video {
+            object-fit: cover !important;
+            border-radius: 1rem;
+        }
+        #qr-reader {
+            border: none !important;
+        }
+        #qr-reader__scan_region {
+            background: transparent;
+        }
+        /* 掃描對焦匡動畫 */
+        @keyframes scan-laser {
+            0% { top: 5%; opacity: 0.8; }
+            50% { top: 90%; opacity: 1; }
+            100% { top: 5%; opacity: 0.8; }
+        }
+        .scan-laser-line {
+            position: absolute;
+            left: 5%;
+            width: 90%;
+            height: 3px;
+            background: linear-gradient(90deg, rgba(59,130,246,0) 0%, rgba(59,130,246,1) 50%, rgba(59,130,246,0) 100%);
+            box-shadow: 0 0 15px #3b82f6;
+            animation: scan-laser 2.5s infinite ease-in-out;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col justify-between max-w-md mx-auto relative overflow-x-hidden">
+
+    <!-- 頂部 Header -->
+    <header class="p-4 bg-slate-900/80 backdrop-blur border-b border-slate-800 sticky top-0 z-20 flex items-center justify-between">
+        <div class="flex items-center space-x-2">
+            <div class="p-2 bg-blue-600/20 text-blue-400 rounded-lg">
+                <i data-lucide="qr-code" class="w-6 h-6"></i>
+            </div>
+            <div>
+                <h1 class="text-base font-bold leading-tight">設備代號轉址器</h1>
+                <p class="text-xs text-slate-400">掃描實體標籤自動開啟舊網址</p>
+            </div>
+        </div>
+        <button id="btn-toggle-lookup" class="p-2 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition">
+            <i data-lucide="table" class="w-5 h-5"></i>
+        </button>
+    </header>
+
+    <!-- 主內容區 -->
+    <main class="p-4 flex-1 flex flex-col justify-center space-y-4">
+        
+        <!-- 相機掃描視窗容器 -->
+        <div class="relative bg-slate-900 border border-slate-800 rounded-2xl p-2 shadow-2xl overflow-hidden min-h-[320px] flex items-center justify-center">
+            <!-- html5-qrcode 渲染區塊 -->
+            <div id="qr-reader" class="w-full h-full overflow-hidden rounded-xl"></div>
+
+            <!-- 自訂動畫與覆蓋層 (當掃描中顯示) -->
+            <div id="scanner-overlay" class="absolute inset-0 pointer-events-none hidden flex flex-col justify-between p-6">
+                <!-- 四角邊框裝飾 -->
+                <div class="flex justify-between">
+                    <div class="w-8 h-8 border-t-4 border-l-4 border-blue-500 rounded-tl-lg"></div>
+                    <div class="w-8 h-8 border-t-4 border-r-4 border-blue-500 rounded-tr-lg"></div>
+                </div>
+                <!-- 掃描雷射線 -->
+                <div class="scan-laser-line"></div>
+                <div class="flex justify-between">
+                    <div class="w-8 h-8 border-b-4 border-l-4 border-blue-500 rounded-bl-lg"></div>
+                    <div class="w-8 h-8 border-b-4 border-r-4 border-blue-500 rounded-br-lg"></div>
+                </div>
+            </div>
+
+            <!-- 未啟動相機時的提示按鈕 -->
+            <div id="start-camera-placeholder" class="text-center p-6 space-y-4">
+                <div class="w-16 h-16 bg-slate-800 rounded-full flex items-center justify-center mx-auto text-slate-400">
+                    <i data-lucide="camera" class="w-8 h-8"></i>
+                </div>
+                <div>
+                    <h2 class="text-sm font-semibold text-slate-300">相機尚未開啟</h2>
+                    <p class="text-xs text-slate-500 mt-1">請點擊下方按鈕授權開啟鏡頭</p>
+                </div>
+                <button id="btn-start-scanner" class="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-medium text-sm rounded-xl shadow-lg shadow-blue-600/30 transition active:scale-95 inline-flex items-center space-x-2">
+                    <i data-lucide="power" class="w-4 h-4"></i>
+                    <span>開啟鏡頭開始掃描</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- 狀態與相機控制列 -->
+        <div class="flex items-center justify-between bg-slate-900 border border-slate-800 rounded-xl p-3">
+            <div class="flex items-center space-x-2">
+                <span id="status-indicator" class="w-2.5 h-2.5 rounded-full bg-slate-500"></span>
+                <span id="status-text" class="text-xs text-slate-400 font-medium">相機已停止</span>
+            </div>
+            <!-- 切換相機按鈕 (預設隱藏) -->
+            <button id="btn-switch-camera" class="hidden text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded-lg border border-slate-700 transition items-center space-x-1">
+                <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+                <span>切換鏡頭</span>
+            </button>
+        </div>
+
+        <!-- 掃描結果卡片 (預設隱藏) -->
+        <div id="result-card" class="hidden bg-slate-900 border rounded-2xl p-4 space-y-3 transition-all duration-300 shadow-xl">
+            <div class="flex items-start space-x-3">
+                <div id="result-icon-bg" class="p-2.5 rounded-xl shrink-0">
+                    <i id="result-icon" class="w-6 h-6"></i>
+                </div>
+                <div class="flex-1 min-w-0">
+                    <div class="flex items-center justify-between">
+                        <h3 id="result-title" class="text-sm font-bold">解碼結果</h3>
+                        <span id="result-badge" class="text-[10px] px-2 py-0.5 rounded-full font-semibold"></span>
+                    </div>
+                    <p id="result-code" class="text-base font-mono font-semibold text-slate-200 mt-0.5 truncate">EQ-000</p>
+                    <p id="result-desc" class="text-xs text-slate-400 mt-1 break-all"></p>
+                </div>
+            </div>
+
+            <!-- 成功跳轉計時條 -->
+            <div id="redirect-progress-container" class="hidden space-y-1.5">
+                <div class="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
+                    <div id="redirect-progress-bar" class="bg-emerald-500 h-full w-0 transition-all duration-1500 ease-linear"></div>
+                </div>
+                <div class="flex justify-between items-center text-[11px] text-emerald-400">
+                    <span>即將自動開啟舊網址...</span>
+                    <a id="link-direct" href="#" class="underline font-medium hover:text-emerald-300">立即前往</a>
+                </div>
+            </div>
+
+            <!-- 失敗重掃按鈕 -->
+            <button id="btn-rescan" class="hidden w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl border border-slate-700 transition active:scale-95 flex items-center justify-center space-x-2">
+                <i data-lucide="rotate-ccw" class="w-4 h-4"></i>
+                <span>重新掃描</span>
+            </button>
+        </div>
+
+    </main>
+
+    <!-- 對照表彈出視窗 (Modal) -->
+    <div id="modal-lookup" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 hidden flex items-end sm:items-center justify-center p-0 sm:p-4">
+        <div class="bg-slate-900 border border-slate-800 w-full max-w-md rounded-t-2xl sm:rounded-2xl max-h-[80vh] flex flex-col overflow-hidden shadow-2xl">
+            <div class="p-4 border-b border-slate-800 flex justify-between items-center">
+                <div class="flex items-center space-x-2">
+                    <i data-lucide="database" class="w-5 h-5 text-blue-400"></i>
+                    <h3 class="font-bold text-sm">目前對照表測試資料</h3>
+                </div>
+                <button id="btn-close-modal" class="p-1 text-slate-400 hover:text-white rounded-lg">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+            <div class="p-4 overflow-y-auto space-y-2 flex-1 text-xs">
+                <p class="text-slate-400 mb-2">請對著手機畫面掃描以下代號，或自行更換程式碼內的對照表：</p>
+                <div id="lookup-table-list" class="space-y-2">
+                    <!-- JS 動態渲染表格內容 -->
+                </div>
+            </div>
+            <div class="p-3 bg-slate-950 border-t border-slate-800 text-center">
+                <p class="text-[11px] text-slate-500">修改程式碼中 <code class="text-blue-400">DEVICE_MAP</code> 物件即可增減設備對照</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- 頁尾 -->
+    <footer class="p-3 text-center text-xs text-slate-500 border-t border-slate-800/60">
+        QR Code Redirector &copy; 設備管理專用工具
+    </footer>
+
+    <!-- JavaScript 邏輯控制 -->
+    <script>
+        /**
+         * ==========================================
+         * 1. 設備代號與舊網址對照表 (JS Map/Object)
+         * ==========================================
+         * 可依需求替換為實際廠內設備代號與舊網址
+         */
+        const DEVICE_MAP = {
+            "1-12": "https://sites.google.com/view/drinkwatertestreport/%E9%A6%96%E9%A0%81?pli=1&authuser=0",
+            "EQ-002": "https://example.com/legacy/device/002",
+            "EQ-003": "https://example.com/legacy/device/003",
+            "CNC-A1": "https://example.com/machine/cnc-a1",
+            "PUMP-99": "https://example.com/system/pump/99"
+        };
+
+        // 頁面元素綁定
+        const btnStartScanner = document.getElementById('btn-start-scanner');
+        const btnSwitchCamera = document.getElementById('btn-switch-camera');
+        const startPlaceholder = document.getElementById('start-camera-placeholder');
+        const scannerOverlay = document.getElementById('scanner-overlay');
+        const statusIndicator = document.getElementById('status-indicator');
+        const statusText = document.getElementById('status-text');
+        
+        const resultCard = document.getElementById('result-card');
+        const resultIconBg = document.getElementById('result-icon-bg');
+        const resultIcon = document.getElementById('result-icon');
+        const resultTitle = document.getElementById('result-title');
+        const resultBadge = document.getElementById('result-badge');
+        const resultCode = document.getElementById('result-code');
+        const resultDesc = document.getElementById('result-desc');
+        const redirectContainer = document.getElementById('redirect-progress-container');
+        const progressBar = document.getElementById('redirect-progress-bar');
+        const linkDirect = document.getElementById('link-direct');
+        const btnRescan = document.getElementById('btn-rescan');
+
+        const btnToggleLookup = document.getElementById('btn-toggle-lookup');
+        const modalLookup = document.getElementById('modal-lookup');
+        const btnCloseModal = document.getElementById('btn-close-modal');
+        const lookupTableList = document.getElementById('lookup-table-list');
+
+        let html5QrCode = null;
+        let currentFacingMode = "environment"; // 預設使用後鏡頭
+        let isScanning = false;
+        let redirectTimer = null;
+
+        // 初始化 圖標
+        lucide.createIcons();
+
+        // 渲染對照表視窗內容
+        function renderLookupModal() {
+            lookupTableList.innerHTML = Object.entries(DEVICE_MAP).map(([code, url]) => `
+                <div class="p-2.5 bg-slate-800/80 rounded-xl border border-slate-700/50 flex flex-col space-y-1">
+                    <div class="flex justify-between items-center">
+                        <span class="font-mono font-bold text-blue-400 text-sm">${code}</span>
+                        <span class="text-[10px] bg-slate-700 text-slate-300 px-2 py-0.5 rounded">對照成功</span>
+                    </div>
+                    <span class="text-slate-400 truncate text-[11px] font-mono">${url}</span>
+                </div>
+            `).join('');
+        }
+        renderLookupModal();
+
+        // 開啟/關閉對照表視窗
+        btnToggleLookup.addEventListener('click', () => modalLookup.classList.remove('hidden'));
+        btnCloseModal.addEventListener('click', () => modalLookup.classList.add('hidden'));
+
+        /**
+         * ==========================================
+         * 2. 啟動 HTML5 QR Code 掃描器
+         * ==========================================
+         */
+        async function startScanner() {
+            try {
+                if (!html5QrCode) {
+                    html5QrCode = new Html5Qrcode("qr-reader");
+                }
+
+                const config = { 
+                    fps: 15, 
+                    qrbox: { width: 220, height: 220 },
+                    aspectRatio: 1.0
+                };
+
+                await html5QrCode.start(
+                    { facingMode: currentFacingMode },
+                    config,
+                    onScanSuccess,
+                    onScanFailure
+                );
+
+                // UI 狀態更新
+                isScanning = true;
+                startPlaceholder.classList.add('hidden');
+                scannerOverlay.classList.remove('hidden');
+                btnSwitchCamera.classList.remove('hidden');
+                btnSwitchCamera.classList.add('flex');
+                resultCard.classList.add('hidden');
+
+                statusIndicator.className = "w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse";
+                statusText.innerText = "掃描中，請對準設備標籤 QR Code";
+
+            } catch (err) {
+                console.error("相機啟動失敗:", err);
+                alert("無法開啟相機，請確認已授予網頁相機權限，且使用 HTTPS 連線。");
+                stopScannerUI();
+            }
+        }
+
+        /**
+         * 停止掃描 UI
+         */
+        function stopScannerUI() {
+            isScanning = false;
+            scannerOverlay.classList.add('hidden');
+            statusIndicator.className = "w-2.5 h-2.5 rounded-full bg-slate-500";
+            statusText.innerText = "掃描已暫停";
+        }
+
+        /**
+         * 暫停相機
+         */
+        async function pauseScanner() {
+            if (html5QrCode && isScanning) {
+                await html5QrCode.stop();
+                stopScannerUI();
+            }
+        }
+
+        /**
+         * 切換前後鏡頭
+         */
+        btnSwitchCamera.addEventListener('click', async () => {
+            await pauseScanner();
+            currentFacingMode = (currentFacingMode === "environment") ? "user" : "environment";
+            startScanner();
+        });
+
+        btnStartScanner.addEventListener('click', startScanner);
+        btnRescan.addEventListener('click', () => {
+            resultCard.classList.add('hidden');
+            startScanner();
+        });
+
+        /**
+         * ==========================================
+         * 3. 掃描成功處理邏輯
+         * ==========================================
+         */
+        async function onScanSuccess(decodedText) {
+            // 清理去空字元
+            const cleanCode = decodedText.trim();
+
+            // 立即暫停相機，避免重複讀取
+            await pauseScanner();
+
+            // 顯示結果卡片
+            resultCard.classList.remove('hidden');
+            resultCode.innerText = cleanCode;
+
+            // 檢查是否在對照表中
+            if (DEVICE_MAP.hasOwnProperty(cleanCode)) {
+                const targetUrl = DEVICE_MAP[cleanCode];
+
+                // 成功狀態 UI
+                resultCard.className = "bg-slate-900 border border-emerald-500/50 rounded-2xl p-4 space-y-3 shadow-xl shadow-emerald-950/20";
+                resultIconBg.className = "p-2.5 rounded-xl shrink-0 bg-emerald-500/10 text-emerald-400";
+                resultIcon.setAttribute('data-lucide', 'check-circle-2');
+                resultTitle.innerText = "設備對照成功";
+                resultTitle.className = "text-sm font-bold text-emerald-400";
+                resultBadge.innerText = "比對成功";
+                resultBadge.className = "text-[10px] px-2 py-0.5 rounded-full font-semibold bg-emerald-500/20 text-emerald-300";
+                resultDesc.innerText = `對應舊網址：${targetUrl}`;
+
+                redirectContainer.classList.remove('hidden');
+                btnRescan.classList.add('hidden');
+                linkDirect.href = targetUrl;
+
+                lucide.createIcons();
+
+                // 觸發進度條動畫
+                setTimeout(() => {
+                    progressBar.style.width = "100%";
+                }, 50);
+
+                // 1.5 秒後執行跳轉
+                redirectTimer = setTimeout(() => {
+                    window.location.href = targetUrl;
+                }, 1500);
+
+            } else {
+                // 失敗 / 未知設備代號 UI
+                resultCard.className = "bg-slate-900 border border-rose-500/50 rounded-2xl p-4 space-y-3 shadow-xl shadow-rose-950/20";
+                resultIconBg.className = "p-2.5 rounded-xl shrink-0 bg-rose-500/10 text-rose-400";
+                resultIcon.setAttribute('data-lucide', 'alert-triangle');
+                resultTitle.innerText = "未知設備代號";
+                resultTitle.className = "text-sm font-bold text-rose-400";
+                resultBadge.innerText = "未找到舊網址";
+                resultBadge.className = "text-[10px] px-2 py-0.5 rounded-full font-semibold bg-rose-500/20 text-rose-300";
+                resultDesc.innerText = "此代號尚未建立對照資料，請確認標籤是否正確或聯絡系統管理者。";
+
+                redirectContainer.classList.add('hidden');
+                btnRescan.classList.remove('hidden');
+
+                lucide.createIcons();
+            }
+        }
+
+        /**
+         * 掃描偵測中（無需特別處理）
+         */
+        function onScanFailure(error) {
+            // 忽略每影格的解析失敗警告
+        }
+    </script>
+</body>
+</html>
